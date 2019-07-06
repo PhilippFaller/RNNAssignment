@@ -83,7 +83,7 @@ def forward(inputs, targets, memory):
 
     # Here you should allocate some variables to store the activations during forward
     # One of them here is to store the hiddens and the cells
-    hs, cs = {}
+    hs, cs, xs, wes, zs, fs, ins, cands, ogs, os, ps, ys = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
 
     hs[-1] = np.copy(hprev)
     cs[-1] = np.copy(cprev)
@@ -107,39 +107,54 @@ def forward(inputs, targets, memory):
 
         # compute the forget gate
         # f_gate = sigmoid (W_f \cdot [h X] + b_f)
+        fs[t] = sigmoid((Wf * zs[t] + bf))
 
         # compute the input gate
         # i_gate = sigmoid (W_i \cdot [h X] + b_i)
+        ins[t] = sigmoid((Wi * zs[t] + bi))
 
         # compute the candidate memory
         # \hat{c} = tanh (W_c \cdot [h X] + b_c])
+        cands[t] = np.tanh(Wc * zs[t] + bc)
 
         # new memory: applying forget gate on the previous memory
         # and then adding the input gate on the candidate memory
         # c_new = f_gate * prev_c + i_gate * \hat{c}
+        cs[t] = fs[t] * cs[t-1] + ins[t] * cands[t]
 
         # output gate
         # o_gate = sigmoid (Wo \cdot [h X] + b_o)
+        ogs[t] = sigmoid(Wo * zs[t] + bo)
 
         # new hidden state for the LSTM
         # h = o_gate * tanh(c_new)
+        hs[t] = ogs[t] * np.tanh(cs[t])
 
         # DONE LSTM
         # output layer - softmax and cross-entropy loss
         # unnormalized log probabilities for next chars
 
         # o = Why \cdot h + by
+        os[t] = Why * hs[t] + by
 
         # softmax for probabilities for next chars
         # p = softmax(o)
+        ps[t] = softmax(os[t])
+
 
         # cross-entropy loss
         # cross entropy loss at time t:
         # create an one hot vector for the label y
+        ys[t] = np.zeros((len(vocab_size), 1))
+        ys[t][targets[t]] = 1
 
         # and then cross-entropy (see the elman-rnn file for the hint)
+        loss_t = np.sum(-np.log(ps[t] * ys[t]))
+
+        loss += loss_t
 
     # define your activations
+    activations = hs, cs, xs, wes, zs, fs, ins, cands, ogs, os, ps, ys
     memory = (hs[len(inputs)-1], cs[len(inputs)-1])
 
     return loss, activations, memory
