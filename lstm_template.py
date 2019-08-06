@@ -83,7 +83,7 @@ def forward(inputs, targets, memory):
 
     # Here you should allocate some variables to store the activations during forward
     # One of them here is to store the hiddens and the cells
-    hs, cs, xs, wes, zs, fs, ins, cands, ogs, os, ps, ys = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
+    hs, cs, xs, wes, zs, fs, ins, cands, otan, ogs, os, ps, ys = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
 
     hs[-1] = np.copy(hprev)
     cs[-1] = np.copy(cprev)
@@ -107,15 +107,15 @@ def forward(inputs, targets, memory):
 
         # compute the forget gate
         # f_gate = sigmoid (W_f \cdot [h X] + b_f)
-        fs[t] = sigmoid((Wf * zs[t] + bf))
+        fs[t] = sigmoid((np.dot(Wf, zs[t]) + bf))
 
         # compute the input gate
         # i_gate = sigmoid (W_i \cdot [h X] + b_i)
-        ins[t] = sigmoid((Wi * zs[t] + bi))
+        ins[t] = sigmoid((np.dot(Wi, zs[t]) + bi))
 
         # compute the candidate memory
         # \hat{c} = tanh (W_c \cdot [h X] + b_c])
-        cands[t] = np.tanh(Wc * zs[t] + bc)
+        cands[t] = np.tanh(np.dot(Wc, zs[t]) + bc)
 
         # new memory: applying forget gate on the previous memory
         # and then adding the input gate on the candidate memory
@@ -124,18 +124,19 @@ def forward(inputs, targets, memory):
 
         # output gate
         # o_gate = sigmoid (Wo \cdot [h X] + b_o)
-        ogs[t] = sigmoid(Wo * zs[t] + bo)
+        ogs[t] = sigmoid(np.dot(Wo, zs[t]) + bo)
 
         # new hidden state for the LSTM
         # h = o_gate * tanh(c_new)
-        hs[t] = ogs[t] * np.tanh(cs[t])
+        otan[t] = np.tanh(cs[t])
+        hs[t] = ogs[t] * otan[t]
 
         # DONE LSTM
         # output layer - softmax and cross-entropy loss
         # unnormalized log probabilities for next chars
 
         # o = Why \cdot h + by
-        os[t] = Why * hs[t] + by
+        os[t] = np.dot(Why, hs[t]) + by
 
         # softmax for probabilities for next chars
         # p = softmax(o)
@@ -169,6 +170,8 @@ def backward(activations, clipping=True):
     dWf, dWi, dWc, dWo = np.zeros_like(Wf), np.zeros_like(Wi),np.zeros_like(Wc), np.zeros_like(Wo)
     dbf, dbi, dbc, dbo = np.zeros_like(bf), np.zeros_like(bi),np.zeros_like(bc), np.zeros_like(bo)
 
+    hs, cs, xs, wes, zs, fs, ins, cands, otan,  ogs, os, ps, ys = activations
+
     # similar to the hidden states in the vanilla RNN
     # We need to initialize the gradients for these variables
     dhnext = np.zeros_like(hs[0])
@@ -179,6 +182,46 @@ def backward(activations, clipping=True):
 
         # IMPLEMENT YOUR BACKPROP HERE
         # refer to the file elman_rnn.py for more details
+
+        # dE/do = prob - label
+        do = ps[t] - ys[t]
+
+        # dE/dWhy = dE/do * do/dWhy
+        dWhy = np.dot(do, hs[t].T)
+        dby = do
+
+        dh = dhnext + np.dot(Why.T, do)
+
+        dog = dhnext * otan[t]
+        dWo = np.dot((dsigmoid(ogs[t]) * zs[t]).T, dog)
+        dbo = dog * dsigmoid(ogs[t])
+        dz = np.dot(Wo.T, dog)
+
+        dotan = dh * ogs[t]
+        dc = dcnext + dotan * dtanh(otan[t])
+
+        df = dc * cs[t-1]
+        dcnext = dc * fs[t]
+        din = dc * cands[t]
+        dcand = dc * ins[t]
+
+        dWf = np.dot((dsigmoid(fs[t]) * zs[t]).T, df)
+        dbf = df * dsigmoid(fs[t])
+        dz += np.dot((dsigmoid(fs[t]) * Wf).T, df)
+
+        dWi = np.dot((dsigmoid(ins[t]) * zs[t]).T, din)
+        dbi = din * dsigmoid(ins[t])
+        dz += np.dot((dsigmoid(ins[t]) * Wi).T, din)
+
+        dWc = np.dot((dtanh(cands[t]) * zs[t]).T, dcand)
+        dbc = dcand * dtanh(cands[t])
+        dz += np.dot((dtanh(cands[t]) * Wc).T, dcand)
+
+        length_h = dhnext.shape
+        dhnext = dz[:length_h]
+        dx = dz[length_h:]
+
+        dWex = np.dot(dx, xs[t].T)
 
 
     if clipping:
@@ -199,10 +242,62 @@ def sample(memory, seed_ix, n):
     h, c = memory
     x = np.zeros((vocab_size, 1))
     x[seed_ix] = 1
+    generated_chars = []
 
     for t in range(n):
         # IMPLEMENT THE FORWARD FUNCTION ONE MORE TIME HERE
         # BUT YOU DON"T NEED TO STORE THE ACTIVATIONS
+
+        x = np.zeros((vocab_size,1)) # encode in 1-of-k representation
+        x[t][inputs[t]] = 1
+
+        # convert word indices to word embeddings
+        wes[t] = np.dot(Wex, xs[t])
+
+        # LSTM cell operation
+        # first concatenate the input and h
+        # This step is irregular (to save the amount of matrix multiplication we have to do)
+        # I will refer to this vector as [h X]
+        zs[t] = np.row_stack((hs[t-1], wes[t]))
+
+        # YOUR IMPLEMENTATION should begin from here
+
+        # compute the forget gate
+        # f_gate = sigmoid (W_f \cdot [h X] + b_f)
+        fs[t] = sigmoid((np.dot(Wf, zs[t]) + bf))
+
+        # compute the input gate
+        # i_gate = sigmoid (W_i \cdot [h X] + b_i)
+        ins[t] = sigmoid((np.dot(Wi, zs[t]) + bi))
+
+        # compute the candidate memory
+        # \hat{c} = tanh (W_c \cdot [h X] + b_c])
+        cands[t] = np.tanh(np.dot(Wc, zs[t]) + bc)
+
+        # new memory: applying forget gate on the previous memory
+        # and then adding the input gate on the candidate memory
+        # c_new = f_gate * prev_c + i_gate * \hat{c}
+        cs[t] = fs[t] * cs[t-1] + ins[t] * cands[t]
+
+        # output gate
+        # o_gate = sigmoid (Wo \cdot [h X] + b_o)
+        ogs[t] = sigmoid(np.dot(Wo, zs[t]) + bo)
+
+        # new hidden state for the LSTM
+        # h = o_gate * tanh(c_new)
+        otan[t] = np.tanh(cs[t])
+        hs[t] = ogs[t] * otan[t]
+
+        # DONE LSTM
+        # output layer - softmax and cross-entropy loss
+        # unnormalized log probabilities for next chars
+
+        # o = Why \cdot h + by
+        os[t] = np.dot(Why, hs[t]) + by
+
+        # softmax for probabilities for next chars
+        # p = softmax(o)
+        ps[t] = softmax(os[t])
 
 
     return
