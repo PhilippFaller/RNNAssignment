@@ -248,59 +248,65 @@ def sample(memory, seed_ix, n):
         # IMPLEMENT THE FORWARD FUNCTION ONE MORE TIME HERE
         # BUT YOU DON"T NEED TO STORE THE ACTIVATIONS
 
-        x = np.zeros((vocab_size,1)) # encode in 1-of-k representation
-        x[t][inputs[t]] = 1
-
         # convert word indices to word embeddings
-        wes[t] = np.dot(Wex, xs[t])
+        we = np.dot(Wex, x[t])
 
         # LSTM cell operation
         # first concatenate the input and h
         # This step is irregular (to save the amount of matrix multiplication we have to do)
         # I will refer to this vector as [h X]
-        zs[t] = np.row_stack((hs[t-1], wes[t]))
+        z = np.row_stack((h, we))
 
         # YOUR IMPLEMENTATION should begin from here
 
         # compute the forget gate
         # f_gate = sigmoid (W_f \cdot [h X] + b_f)
-        fs[t] = sigmoid((np.dot(Wf, zs[t]) + bf))
+        f = sigmoid((np.dot(Wf, z) + bf))
 
         # compute the input gate
         # i_gate = sigmoid (W_i \cdot [h X] + b_i)
-        ins[t] = sigmoid((np.dot(Wi, zs[t]) + bi))
+        ing = sigmoid((np.dot(Wi, z) + bi))
 
         # compute the candidate memory
         # \hat{c} = tanh (W_c \cdot [h X] + b_c])
-        cands[t] = np.tanh(np.dot(Wc, zs[t]) + bc)
+        cand = np.tanh(np.dot(Wc, z) + bc)
 
         # new memory: applying forget gate on the previous memory
         # and then adding the input gate on the candidate memory
         # c_new = f_gate * prev_c + i_gate * \hat{c}
-        cs[t] = fs[t] * cs[t-1] + ins[t] * cands[t]
+        c = f * c + ing * cand
 
         # output gate
         # o_gate = sigmoid (Wo \cdot [h X] + b_o)
-        ogs[t] = sigmoid(np.dot(Wo, zs[t]) + bo)
+        og = sigmoid(np.dot(Wo, z) + bo)
 
         # new hidden state for the LSTM
         # h = o_gate * tanh(c_new)
-        otan[t] = np.tanh(cs[t])
-        hs[t] = ogs[t] * otan[t]
+        otan = np.tanh(c)
+        h = og * otan
 
         # DONE LSTM
         # output layer - softmax and cross-entropy loss
         # unnormalized log probabilities for next chars
 
         # o = Why \cdot h + by
-        os[t] = np.dot(Why, hs[t]) + by
+        o = np.dot(Why, h) + by
 
         # softmax for probabilities for next chars
         # p = softmax(o)
-        ps[t] = softmax(os[t])
+        p = softmax(o)
 
+        # we randomly samples char from distribution, parametrized by p
+        ix = np.random.multinomial(1, p.ravel())
+        c = np.zeros((vocab_size, 1))
 
-    return
+        for j in range(len(ix)):
+            if ix[j] == 1:
+                index = j
+        c[index] = 1
+        generated_chars.append(index)
+
+    return generated_chars
 
 if option == 'train':
 
