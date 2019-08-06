@@ -83,7 +83,7 @@ def forward(inputs, targets, memory):
 
     # Here you should allocate some variables to store the activations during forward
     # One of them here is to store the hiddens and the cells
-    hs, cs, xs, wes, zs, fs, ins, cands, otan, ogs, os, ps, ys = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
+    hs, cs, xs, wes, zs, fs, ins, cands, otans, ogs, os, ps, ys = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
 
     hs[-1] = np.copy(hprev)
     cs[-1] = np.copy(cprev)
@@ -128,8 +128,8 @@ def forward(inputs, targets, memory):
 
         # new hidden state for the LSTM
         # h = o_gate * tanh(c_new)
-        otan[t] = np.tanh(cs[t])
-        hs[t] = ogs[t] * otan[t]
+        otans[t] = np.tanh(cs[t])
+        hs[t] = ogs[t] * otans[t]
 
         # DONE LSTM
         # output layer - softmax and cross-entropy loss
@@ -142,20 +142,18 @@ def forward(inputs, targets, memory):
         # p = softmax(o)
         ps[t] = softmax(os[t])
 
-
-        # cross-entropy loss
         # cross entropy loss at time t:
         # create an one hot vector for the label y
-        ys[t] = np.zeros((len(vocab_size), 1))
+        ys[t] = np.zeros((vocab_size, 1))
         ys[t][targets[t]] = 1
 
         # and then cross-entropy (see the elman-rnn file for the hint)
-        loss_t = np.sum(-np.log(ps[t] * ys[t]))
+        loss_t = np.sum(-np.log(ps[t]) * ys[t])
 
         loss += loss_t
 
     # define your activations
-    activations = hs, cs, xs, wes, zs, fs, ins, cands, ogs, os, ps, ys
+    activations = hs, cs, xs, wes, zs, fs, ins, cands, otans,  ogs, os, ps, ys
     memory = (hs[len(inputs)-1], cs[len(inputs)-1])
 
     return loss, activations, memory
@@ -170,7 +168,7 @@ def backward(activations, clipping=True):
     dWf, dWi, dWc, dWo = np.zeros_like(Wf), np.zeros_like(Wi),np.zeros_like(Wc), np.zeros_like(Wo)
     dbf, dbi, dbc, dbo = np.zeros_like(bf), np.zeros_like(bi),np.zeros_like(bc), np.zeros_like(bo)
 
-    hs, cs, xs, wes, zs, fs, ins, cands, otan,  ogs, os, ps, ys = activations
+    hs, cs, xs, wes, zs, fs, ins, cands, otans,  ogs, os, ps, ys = activations
 
     # similar to the hidden states in the vanilla RNN
     # We need to initialize the gradients for these variables
@@ -187,41 +185,41 @@ def backward(activations, clipping=True):
         do = ps[t] - ys[t]
 
         # dE/dWhy = dE/do * do/dWhy
-        dWhy = np.dot(do, hs[t].T)
-        dby = do
+        dWhy += np.dot(do, hs[t].T)
+        dby += do
 
         dh = dhnext + np.dot(Why.T, do)
 
-        dog = dhnext * otan[t]
-        dWo = np.dot((dsigmoid(ogs[t]) * zs[t]).T, dog)
-        dbo = dog * dsigmoid(ogs[t])
-        dz = np.dot(Wo.T, dog)
+        dog = dh * otans[t]
+        dWo += np.dot(dog * dsigmoid(ogs[t]), zs[t].T)
+        dbo += dog * dsigmoid(ogs[t])
+        dz = np.dot(Wo.T, dog * dsigmoid(ogs[t]))
 
         dotan = dh * ogs[t]
-        dc = dcnext + dotan * dtanh(otan[t])
+        dc = dcnext + dotan * dtanh(otans[t])
 
         df = dc * cs[t-1]
         dcnext = dc * fs[t]
         din = dc * cands[t]
         dcand = dc * ins[t]
 
-        dWf = np.dot((dsigmoid(fs[t]) * zs[t]).T, df)
-        dbf = df * dsigmoid(fs[t])
-        dz += np.dot((dsigmoid(fs[t]) * Wf).T, df)
+        dWf += np.dot(df * dsigmoid(fs[t]), zs[t].T)
+        dbf += df * dsigmoid(fs[t])
+        dz += np.dot(Wf.T, df * dsigmoid(fs[t]))
 
-        dWi = np.dot((dsigmoid(ins[t]) * zs[t]).T, din)
-        dbi = din * dsigmoid(ins[t])
-        dz += np.dot((dsigmoid(ins[t]) * Wi).T, din)
+        dWi += np.dot(din * dsigmoid(ins[t]), zs[t].T)
+        dbi += din * dsigmoid(ins[t])
+        dz += np.dot(Wi.T, din * dsigmoid(ins[t]))
 
-        dWc = np.dot((dtanh(cands[t]) * zs[t]).T, dcand)
-        dbc = dcand * dtanh(cands[t])
-        dz += np.dot((dtanh(cands[t]) * Wc).T, dcand)
+        dWc += np.dot(dcand * dtanh(cands[t]), zs[t].T)
+        dbc += dcand * dtanh(cands[t])
+        dz += np.dot(Wc.T, dcand * dtanh(cands[t]))
 
-        length_h = dhnext.shape
+        length_h = dhnext.shape[0]
         dhnext = dz[:length_h]
         dx = dz[length_h:]
 
-        dWex = np.dot(dx, xs[t].T)
+        dWex += np.dot(dx, xs[t].T)
 
 
     if clipping:
@@ -249,7 +247,7 @@ def sample(memory, seed_ix, n):
         # BUT YOU DON"T NEED TO STORE THE ACTIVATIONS
 
         # convert word indices to word embeddings
-        we = np.dot(Wex, x[t])
+        we = np.dot(Wex, x)
 
         # LSTM cell operation
         # first concatenate the input and h
@@ -298,12 +296,12 @@ def sample(memory, seed_ix, n):
 
         # we randomly samples char from distribution, parametrized by p
         ix = np.random.multinomial(1, p.ravel())
-        c = np.zeros((vocab_size, 1))
+        x = np.zeros((vocab_size, 1))
 
         for j in range(len(ix)):
             if ix[j] == 1:
                 index = j
-        c[index] = 1
+        x[index] = 1
         generated_chars.append(index)
 
     return generated_chars
@@ -360,7 +358,6 @@ if option == 'train':
             break
 
 elif option == 'gradcheck':
-
     p = 0
     inputs = [char_to_ix[ch] for ch in data[p:p+seq_length]]
     targets = [char_to_ix[ch] for ch in data[p+1:p+seq_length+1]]
@@ -380,7 +377,7 @@ elif option == 'gradcheck':
                                    [dWf, dWi, dWo, dWc, dbf, dbi, dbo, dbc, dWex    , dWhy, dby],
                                    ['Wf', 'Wi', 'Wo', 'Wc', 'bf', 'bi', 'bo', 'bc', 'Wex', 'Why', 'by']):
 
-        str_ = ("Dimensions dont match between weight and gradient %s and %s." % (weight.shape, grad.shape))
+        str_ = ("Dimensions dont match between weight and gradient %s and %s for %s." % (weight.shape, grad.shape, name))
         assert(weight.shape == grad.shape), str_
 
         print(name)
