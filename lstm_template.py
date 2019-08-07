@@ -104,18 +104,17 @@ def forward(inputs, targets, memory):
         zs[t] = np.row_stack((hs[t-1], wes[t]))
 
         # YOUR IMPLEMENTATION should begin from here
-
         # compute the forget gate
         # f_gate = sigmoid (W_f \cdot [h X] + b_f)
-        fs[t] = sigmoid((Wf * zs[t] + bf))
+        fs[t] = sigmoid(np.dot(Wf, zs[t]) + bf)
 
         # compute the input gate
         # i_gate = sigmoid (W_i \cdot [h X] + b_i)
-        ins[t] = sigmoid((Wi * zs[t] + bi))
+        ins[t] = sigmoid(np.dot(Wi, zs[t]) + bi)
 
         # compute the candidate memory
         # \hat{c} = tanh (W_c \cdot [h X] + b_c])
-        cands[t] = np.tanh(Wc * zs[t] + bc)
+        cands[t] = np.tanh(np.dot(Wc, zs[t]) + bc)
 
         # new memory: applying forget gate on the previous memory
         # and then adding the input gate on the candidate memory
@@ -124,7 +123,7 @@ def forward(inputs, targets, memory):
 
         # output gate
         # o_gate = sigmoid (Wo \cdot [h X] + b_o)
-        ogs[t] = sigmoid(Wo * zs[t] + bo)
+        ogs[t] = sigmoid(np.dot(Wo, zs[t]) + bo)
 
         # new hidden state for the LSTM
         # h = o_gate * tanh(c_new)
@@ -135,7 +134,7 @@ def forward(inputs, targets, memory):
         # unnormalized log probabilities for next chars
 
         # o = Why \cdot h + by
-        os[t] = Why * hs[t] + by
+        os[t] = np.dot(Why, hs[t]) + by
 
         # softmax for probabilities for next chars
         # p = softmax(o)
@@ -145,11 +144,11 @@ def forward(inputs, targets, memory):
         # cross-entropy loss
         # cross entropy loss at time t:
         # create an one hot vector for the label y
-        ys[t] = np.zeros((len(vocab_size), 1))
+        ys[t] = np.zeros((vocab_size, 1))
         ys[t][targets[t]] = 1
 
         # and then cross-entropy (see the elman-rnn file for the hint)
-        loss_t = np.sum(-np.log(ps[t] * ys[t]))
+        loss_t = np.sum(-np.log(ps[t]) * ys[t])
 
         loss += loss_t
 
@@ -161,13 +160,15 @@ def forward(inputs, targets, memory):
 
 
 def backward(activations, clipping=True):
-
     # backward pass: compute gradients going backwards
     # Here we allocate memory for the gradients
     dWex, dWhy = np.zeros_like(Wex), np.zeros_like(Why)
     dby = np.zeros_like(by)
     dWf, dWi, dWc, dWo = np.zeros_like(Wf), np.zeros_like(Wi),np.zeros_like(Wc), np.zeros_like(Wo)
     dbf, dbi, dbc, dbo = np.zeros_like(bf), np.zeros_like(bi),np.zeros_like(bc), np.zeros_like(bo)
+
+    # Get activations
+    hs, cs, xs, wes, zs, fs, ins, cands, ogs, os, ps, ys = activations
 
     # similar to the hidden states in the vanilla RNN
     # We need to initialize the gradients for these variables
@@ -176,10 +177,63 @@ def backward(activations, clipping=True):
 
     # back propagation through time starts here
     for t in reversed(range(len(inputs))):
-
         # IMPLEMENT YOUR BACKPROP HERE
         # refer to the file elman_rnn.py for more details
 
+        # Backprop for the softmax output ps inclusive the weights and bias for ps
+        # Function: os[t] = np.dot(Why * hs[t]) + by
+        do = ps[t] - ys[t]
+        # do = np.copy(ps[t])
+        # do[targets[t]] -= 1
+        dWhy += np.dot(do, hs[t].T)
+        dby += do
+        dh = np.dot(Why.T, do) + dhnext
+
+        # Backprop for the output gate (dog=derivative output gate)
+        # Function: hs[t] = ogs[t] * np.tanh(cs[t])
+        dog = dh * np.tanh(cs[t])
+        # ogs = sigmoid(np.dot(Wo, zs) + bo)
+        dog = dsigmoid(ogs[t]) * dog
+        dWo += np.dot(dog, zs[t].T)
+        dbo += dog
+
+        # Backprop for memory cell
+        # Function: hs[t] = ogs[t] * np.tanh(cs[t])
+        dc = dh * ogs[t] * dtanh(np.tanh(cs[t])) + dcnext
+
+        # Backprop for candidate gate
+        # Funtion: cs[t] = fs[t] * cs[t-1] + ins[t] * cands[t]
+        dcand = dc * ins[t]
+        # Function: cands[t] = np.tanh(np.dot(Wc, zs[t]) + bc)
+        dcand = dcand * dtanh(cands[t])
+        dWc += np.dot(dcand, zs[t].T)
+        dbc += dcand
+
+        # Backprop for input gate
+        # Funtion: cs[t] = fs[t] * cs[t-1] + ins[t] * cands[t]
+        din = dc * cands[t]
+        # Function: ins[t] = sigmoid(np.dot(Wi, zs[t]) + bi)
+        din = din * dsigmoid(ins[t])
+        dWi += np.dot(din, zs[t].T)
+        dbi += din
+
+        # Backprop for forget gate
+        # Function: cs[t] = fs[t] * cs[t-1] + ins[t] * cands[t]
+        df = dc * cs[t-1]
+        # Function: fs[t] = sigmoid(np.dot(Wf, zs[t]) + bf)
+        df = df * dsigmoid(fs[t])
+        dWf += np.dot(df, zs[t].T)
+        dbf += df
+
+        # Backprop for the input (X) with regard to the gates gradients
+        dXf = np.dot(Wf.T, df)
+        dXin = np.dot(Wi.T, din)
+        dXcand = np.dot(Wc.T, dcand)
+        dXog = np.dot(Wo.T, dog)
+        dX = dXf + dXin + dXcand + dXog
+
+        dhnext = dX[:hidden_size, :]
+        dcnext= fs[t] * dc
 
     if clipping:
         # clip to mitigate exploding gradients
@@ -199,13 +253,27 @@ def sample(memory, seed_ix, n):
     h, c = memory
     x = np.zeros((vocab_size, 1))
     x[seed_ix] = 1
-
+    sampled_integers = []
     for t in range(n):
         # IMPLEMENT THE FORWARD FUNCTION ONE MORE TIME HERE
         # BUT YOU DON"T NEED TO STORE THE ACTIVATIONS
+        wes = np.dot(Wex, x)
+        zs = np.row_stack((h, wes))
+        fs = sigmoid(np.dot(Wf, zs) + bf)
+        ins = sigmoid(np.dot(Wi, zs) + bi)
+        cands = np.tanh(np.dot(Wc, zs) + bc)
+        cs = fs * c + ins * cands
+        ogs = sigmoid(np.dot(Wo, zs) + bo)
+        hs = ogs * np.tanh(cs)
+        os = np.dot(Why, hs) + by
+        ps = np.exp(os) / np.sum(np.exp(os))
 
-
-    return
+        index = np.random.choice(range(vocab_size), p=ps.ravel())
+        # Set new index seed
+        x = np.zeros((vocab_size,1))
+        x[index] = 1
+        sampled_integers.append(index)
+    return sampled_integers
 
 if option == 'train':
 
