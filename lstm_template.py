@@ -232,8 +232,10 @@ def backward(activations, clipping=True):
         dXog = np.dot(Wo.T, dog)
         dX = dXf + dXin + dXcand + dXog
 
-        dhnext = dX[:hidden_size, :]
+        dhnext = dX[:hidden_size]
         dcnext= fs[t] * dc
+
+        dWex += np.dot(dX[hidden_size:], xs[t].T)
 
     if clipping:
         # clip to mitigate exploding gradients
