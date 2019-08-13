@@ -264,15 +264,16 @@ def sample(memory, seed_ix, n):
         fs = sigmoid(np.dot(Wf, zs) + bf)
         ins = sigmoid(np.dot(Wi, zs) + bi)
         cands = np.tanh(np.dot(Wc, zs) + bc)
-        cs = fs * c + ins * cands
+        c = fs * c + ins * cands
         ogs = sigmoid(np.dot(Wo, zs) + bo)
-        hs = ogs * np.tanh(cs)
-        os = np.dot(Why, hs) + by
-        ps = np.exp(os) / np.sum(np.exp(os))
-
-        index = np.random.choice(range(vocab_size), p=ps.ravel())
-        # Set new index seed
-        x = np.zeros((vocab_size,1))
+        h = ogs * np.tanh(c)
+        os = np.dot(Why, h) + by
+        ps = softmax(os)
+        ix = np.random.multinomial(1, ps.ravel())
+        x = np.zeros((vocab_size, 1))
+        for j in range(len(ix)):
+            if ix[j] == 1:
+                index = j
         x[index] = 1
         sampled_integers.append(index)
     return sampled_integers
